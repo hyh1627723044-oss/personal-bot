@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
-import { useRTVIClientEvent } from '@pipecat-ai/client-react';
+import { useConversationContext, useRTVIClientEvent } from '@pipecat-ai/client-react';
 import { createClient, releaseClient, stopLocalTracks } from './client';
+import { sendVoiceText } from './voiceText';
 
 type Phase = 'idle' | 'connecting' | 'active' | 'stopping';
 type Attempt = { client: PipecatClient; abort: AbortController };
@@ -24,6 +25,7 @@ export function useVoiceCall(onClientCreated: (client: PipecatClient) => void) {
   const [seconds, setSeconds] = useState(0);
   const current = useRef<Attempt | null>(null);
   const mounted = useRef(true);
+  const { injectMessage } = useConversationContext();
 
   const finish = useCallback(async (message = '') => {
     const attempt = current.current;
@@ -125,5 +127,17 @@ export function useVoiceCall(onClientCreated: (client: PipecatClient) => void) {
     if (!muted) setSpeaking(null);
   };
 
-  return { phase, error, muted, speaking, seconds, start, hangup: finish, toggleMute };
+  const sendText = async (draft: string) => {
+    const attempt = current.current;
+    if (!attempt || phase !== 'active') throw new Error('请先建立语音通话，再发送文字。');
+    const createdAt = new Date().toISOString();
+    const text = await sendVoiceText(attempt.client, draft);
+    if (current.current !== attempt || attempt.abort.signal.aborted) {
+      throw new Error('通话已结束，请重新连接。');
+    }
+    // The conversation hook renders ASR transcripts, but does not echo sendText.
+    injectMessage({ role: 'user', parts: [{ text, final: true, createdAt }] });
+  };
+
+  return { phase, error, muted, speaking, seconds, start, hangup: finish, toggleMute, sendText };
 }

@@ -81,9 +81,12 @@ def test_cancelling_stream_releases_upstream_and_concurrency_slot(servers):
     cancelled_before = upstream.state.cancelled
     with httpx.Client(base_url=servers, timeout=5) as client:
         with client.stream('POST', '/api/chat', json=payload('慢速')) as response:
-            for line in response.iter_lines():
+            # Keep the iterator alive: collecting it closes the HTTP stream early.
+            lines = response.iter_lines()
+            for line in lines:
                 if line.startswith('data:'):
                     break
+            assert upstream.state.active == 1
             assert client.post('/api/chat', json=payload('繁忙')).status_code == 429
         eventually(lambda: upstream.state.active == 0)
         assert upstream.state.cancelled > cancelled_before

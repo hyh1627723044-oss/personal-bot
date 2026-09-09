@@ -5,6 +5,7 @@ import { ArrowUpRight, AudioLines, Check, ChevronDown, CircleHelp, Headphones, L
 import { transcriptText } from './transcript';
 import { useVoiceCall } from './useVoiceCall';
 import TextChat from './TextChat';
+import VoiceComposer from './VoiceComposer';
 
 type Service = { provider: string | null; supported: string[]; configured: boolean };
 type Config = { ready: boolean; text_ready: boolean; text_missing: string[]; missing: string[]; issues: string[]; services: Record<string, Service> };
@@ -48,6 +49,16 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
   const missingFields = (mode === 'text' ? config?.text_missing : config?.missing) ?? [];
   const configIssues = config?.issues.filter(issue => mode === 'voice' || issue.includes('LLM_')) ?? [];
   const modalRef = useRef<HTMLElement>(null);
+  const [switching, setSwitching] = useState(false);
+  const switchLock = useRef(false);
+  const selectMode = async (next: 'text' | 'voice') => {
+    if (next === mode || switchLock.current) return;
+    switchLock.current = true; setSwitching(true);
+    try {
+      if (next === 'text') await hangup();
+      setMode(next);
+    } finally { switchLock.current = false; setSwitching(false); }
+  };
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -89,8 +100,8 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
     <aside className="sidebar">
       <a className="brand" href="/" aria-label="轻声首页"><span className="brand-symbol"><AudioLines size={24}/></span><span>轻声<small>YOUR VOICE COMPANION</small></span></a>
       <div className="nav-label">我的空间</div>
-      <button className={`nav-item ${mode === 'text' ? 'selected' : ''}`} onClick={() => setMode('text')}><MessageSquare size={18}/>文字聊天{mode === 'text' && <span className="nav-dot"/>}</button>
-      <button className={`nav-item ${mode === 'voice' ? 'selected' : ''}`} onClick={() => setMode('voice')}><Headphones size={18}/>语音对话{(mode === 'voice' || active) && <span className="nav-dot"/>}</button>
+      <button disabled={switching || stopping} className={`nav-item ${mode === 'text' ? 'selected' : ''}`} onClick={() => { void selectMode('text'); }}><MessageSquare size={18}/>文字模式{mode === 'text' && <span className="nav-dot"/>}</button>
+      <button disabled={switching || stopping} className={`nav-item ${mode === 'voice' ? 'selected' : ''}`} onClick={() => { void selectMode('voice'); }}><Headphones size={18}/>语音模式{(mode === 'voice' || active) && <span className="nav-dot"/>}</button>
       <button className="nav-item" onClick={() => showSettings(true)}><SlidersHorizontal size={18}/>服务配置</button>
       <div className="sidebar-bottom"><div className="privacy"><ShieldCheck size={18}/><div>只专注此刻的对话<p>本次对话不保存到历史记录</p></div></div><button className="nav-item" onClick={() => showHelp(true)}><CircleHelp size={18}/>使用帮助<ArrowUpRight size={15}/></button><div className="profile"><span>我</span><div>个人空间<small>语音助手 · MVP</small></div></div></div>
     </aside>
@@ -98,9 +109,9 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
       <header><div className="breadcrumb">个人空间<span>/</span><strong>{mode === 'text' ? '文字聊天' : '语音对话'}</strong></div><button className={`service-pill ${modeReady ? 'online' : ''}`} onClick={() => showSettings(true)}><i/>{loading ? '检查服务中' : modeReady ? '服务已配置' : '服务待配置'}<ChevronDown size={13}/></button></header>
       <div className="workspace">
         <div className="page-title"><div className="eyebrow">A LITTLE SPACE TO TALK</div><h1>说出来，轻松一点。</h1><p>想法、问题，或今天的小事。我在这里听你说。</p></div>
-        <div className="mode-switch" aria-label="对话方式"><button className={mode === 'text' ? 'selected' : ''} aria-pressed={mode === 'text'} onClick={() => setMode('text')}><MessageSquare size={15}/>文字聊天</button><button className={mode === 'voice' ? 'selected' : ''} aria-pressed={mode === 'voice'} onClick={() => setMode('voice')}><Headphones size={15}/>语音对话{active ? ' · 通话中' : ''}</button></div>
+        <div className="mode-switch" aria-label="对话方式"><button disabled={switching || stopping} className={mode === 'text' ? 'selected' : ''} aria-pressed={mode === 'text'} onClick={() => { void selectMode('text'); }}><MessageSquare size={15}/>文字模式</button><button disabled={switching || stopping} className={mode === 'voice' ? 'selected' : ''} aria-pressed={mode === 'voice'} onClick={() => { void selectMode('voice'); }}><Headphones size={15}/>语音模式{active ? ' · 通话中' : ''}</button></div>
         {displayedError && <div className="error-banner" role="alert">{displayedError}<button onClick={() => { void refresh(); }} aria-label="重新检查连接"><RefreshCw size={16}/></button></div>}
-        <div hidden={mode !== 'text'}><TextChat ready={Boolean(config?.text_ready)} onConfigure={() => showSettings(true)}/></div>
+        <div hidden={mode !== 'text'}><TextChat enabled={mode === 'text'} ready={Boolean(config?.text_ready)} onConfigure={() => showSettings(true)}/></div>
         <div hidden={mode !== 'voice'}>
         <div className="conversation-grid">
           <section className="call-card" aria-label="语音通话">
@@ -111,7 +122,7 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
             <div className="call-controls"><button className={`icon-button ${muted ? 'muted' : ''}`} onClick={toggleMute} disabled={!active || pending} aria-label={muted ? '取消静音' : '静音'} aria-pressed={muted}>{muted ? <MicOff size={21}/> : <Mic size={21}/>}</button><button className={`primary-button ${active ? 'hangup' : ''}`} onClick={() => { void (active || connecting ? hangup() : start()); }} disabled={stopping || (loading && !active && !connecting)}>{pending ? <LoaderCircle className="spin" size={19}/> : active ? <PhoneOff size={19}/> : <Phone size={19}/>} {stopping ? '正在结束' : connecting ? '取消连接' : active ? '结束通话' : '开始通话'}</button><button className="icon-button" onClick={() => showSettings(true)} aria-label="打开服务配置"><SlidersHorizontal size={20}/></button></div>
             <div className="call-footnote"><ShieldCheck size={13}/> {active ? '通话结束后，服务端会话自动释放' : '开始通话时，会请求使用你的麦克风'}</div>
           </section>
-          <section className="transcript-card"><div className="transcript-heading"><h2><MessageSquare size={17}/>实时对话</h2><span>仅本次</span></div><Transcript/><div className="transcript-footer"><i/>文字随对话显示</div></section>
+          <section className="transcript-card"><div className="transcript-heading"><h2><MessageSquare size={17}/>实时对话</h2><span>语音与文字</span></div><Transcript/><VoiceComposer active={active && !switching} onSend={call.sendText}/></section>
         </div>
         <div className="tips"><div><span><Waves size={19}/></span><section><h3>像聊天一样自然</h3><p>不用长按，说完后我会自动回应。</p></section></div><div><span><Mic size={18}/></span><section><h3>随时接着说</h3><p>有新的想法，直接开口打断我。</p></section></div><div><span><Headphones size={19}/></span><section><h3>戴上耳机更清晰</h3><p>安静的环境，让对话更顺畅。</p></section></div></div>
         </div>

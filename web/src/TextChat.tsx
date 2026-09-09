@@ -6,7 +6,7 @@ import './chat.css';
 type Message = RequestMessage & { id: string; state?: 'streaming' | 'complete' | 'stopped' | 'error' };
 type Request = { abort: AbortController; assistantId: string; history: Message[] };
 
-export default function TextChat({ ready, onConfigure }: { ready: boolean; onConfigure: () => void }) {
+export default function TextChat({ ready, enabled = true, onConfigure }: { ready: boolean; enabled?: boolean; onConfigure: () => void }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,6 +31,10 @@ export default function TextChat({ ready, onConfigure }: { ready: boolean; onCon
     setRetryHistory(request.history);
     setBusy(false);
   };
+
+  useEffect(() => {
+    if (!enabled) stop();
+  }, [enabled]);
 
   const generate = async (history: Message[]) => {
     if (current.current) return;
