@@ -41,7 +41,7 @@ class Settings(BaseSettings):
         '你是一位友好、耐心的个人语音助手。使用简体中文自然交流，'
         '每次回答尽量简洁，适合朗读，不使用 Markdown 格式。'
     )
-    ice_servers: list[IceServerConfig] = []
+    ice_servers: list[IceServerConfig] = Field(default_factory=list)
     max_sessions: int = Field(default=2, ge=1, le=20)
     session_timeout_seconds: int = Field(default=1800, ge=30, le=7200)
 
@@ -74,5 +74,13 @@ class Settings(BaseSettings):
             url = getattr(self, f'{stage}_base_url')
             if url and not url.startswith(('http://', 'https://')):
                 issues.append(f'{stage.upper()}_BASE_URL 必须是 HTTP(S) 地址')
+        for stage, service in services.items():
+            prefix = f'{stage.upper()}_'
+            service['configured'] = (
+                not any(name.startswith(prefix) for name in missing)
+                and not any(prefix in issue for issue in issues)
+            )
         return {'ready': not missing and not issues, 'missing': missing,
-                'issues': issues, 'services': services}
+                'issues': issues, 'services': services,
+                'text_ready': services['llm']['configured'],
+                'text_missing': [name for name in missing if name.startswith('LLM_')]}

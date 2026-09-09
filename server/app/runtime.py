@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from aiortc.sdp import candidate_from_sdp
 from fastapi import HTTPException
@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 class Session:
     connection: SmallWebRTCConnection
     task: asyncio.Task | None = None
+    stop: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class VoiceRuntime:
@@ -27,6 +28,7 @@ class VoiceRuntime:
         self.bot_runner = bot_runner
         self.sessions: dict[str, Session] = {}
         self.lock = asyncio.Lock()
+        self.shutting_down = False
 
     @property
     def active_count(self):
@@ -34,6 +36,8 @@ class VoiceRuntime:
 
     async def offer(self, body: dict) -> dict:
         async with self.lock:
+            if self.shutting_down:
+                raise HTTPException(503, detail='服务正在关闭，请稍后重试')
             pc_id = body.get('pc_id')
             if pc_id:
                 session = self.sessions.get(pc_id)
@@ -46,8 +50,7 @@ class VoiceRuntime:
                     ), timeout=30)
                     return session.connection.get_answer()
                 except Exception:
-                    if session.task:
-                        session.task.cancel()
+                    session.stop.set()
                     raise HTTPException(400, detail='重新连接失败，请重新发起通话') from None
             if self.active_count >= self.settings.max_sessions:
                 raise HTTPException(429, detail='当前通话数量已达上限，请先结束其他通话')
@@ -75,25 +78,35 @@ class VoiceRuntime:
 
             @connection.event_handler('closed')
             async def closed(connection):
-                if (connection.pc_id in self.sessions and session.task
-                        and session.task is not asyncio.current_task()):
-                    session.task.cancel()
+                session.stop.set()
 
             session.task = asyncio.create_task(self._run_session(session))
             return answer
 
     async def _run_session(self, session: Session):
+        bot = asyncio.create_task(self.bot_runner(session.connection, self.settings))
+        stopped = asyncio.create_task(session.stop.wait())
         try:
-            async with asyncio.timeout(self.settings.session_timeout_seconds):
-                await self.bot_runner(session.connection, self.settings)
+            done, _ = await asyncio.wait(
+                (bot, stopped), timeout=self.settings.session_timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if bot in done:
+                await bot
         except asyncio.CancelledError:
             raise
         except Exception as error:
             # Avoid logging provider payloads, transcripts or credentials.
             logger.warning('Voice session stopped (%s)', type(error).__name__)
         finally:
-            self.sessions.pop(session.connection.pc_id, None)
-            await session.connection.disconnect()
+            stopped.cancel()
+            if not bot.done():
+                bot.cancel()
+            await asyncio.gather(bot, stopped, return_exceptions=True)
+            try:
+                await session.connection.disconnect()
+            finally:
+                self.sessions.pop(session.connection.pc_id, None)
 
     async def patch(self, body: dict):
         session = self.sessions.get(body['pc_id'])
@@ -111,10 +124,10 @@ class VoiceRuntime:
 
     async def close(self):
         async with self.lock:
+            self.shutting_down = True
             sessions = list(self.sessions.values())
             for session in sessions:
-                if session.task:
-                    session.task.cancel()
+                session.stop.set()
             await asyncio.gather(
                 *(session.task for session in sessions if session.task), return_exceptions=True,
             )

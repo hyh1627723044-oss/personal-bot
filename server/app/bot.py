@@ -1,5 +1,7 @@
 """One independent STT → LLM → TTS pipeline per call."""
 
+import asyncio
+
 from app.providers import create_services
 from app.settings import Settings
 
@@ -44,4 +46,15 @@ async def run_bot(connection, config: Settings):
 
     runner = WorkerRunner(handle_sigint=False)
     await runner.add_workers(worker)
-    await runner.run()
+    run_task = asyncio.create_task(runner.run())
+    try:
+        # Keep cancellation out of the runner's setup phase so it reaches cleanup.
+        await asyncio.shield(run_task)
+    finally:
+        if not run_task.done():
+            await runner.cancel()
+            try:
+                await asyncio.wait_for(asyncio.shield(run_task), timeout=10)
+            except (TimeoutError, asyncio.CancelledError):
+                run_task.cancel()
+                await asyncio.gather(run_task, return_exceptions=True)
