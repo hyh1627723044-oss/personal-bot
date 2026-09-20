@@ -1,6 +1,8 @@
 # 轻声 · 个人助手
 
-React + TypeScript 网页端，FastAPI 后端。默认进入文字聊天，通过 OpenAI 兼容接口流式生成回复；只需配置 LLM，不依赖 ASR/TTS。语音模块使用 Pipecat + SmallWebRTC，流水线为 STT → LLM → TTS，可以之后再配置。
+React + TypeScript 网页端，FastAPI 后端。默认进入文字聊天，通过 OpenAI 兼容接口流式生成回复；只需配置 LLM，不依赖 ASR/TTS。语音模块使用 Pipecat + SmallWebRTC，可选择 STT → LLM → TTS 或端到端 Realtime 模型，两者都支持通话内打字。
+
+新增千问 Qwen Audio 3、阶跃 StepAudio 3 Realtime 接入，配置方法见 [实时语音模型](docs/realtime.md)。在 `server/.env` 设置 `VOICE_ENGINE=realtime` 与 `REALTIME_*` 即可切换；默认 `cascade` 保持原有行为。
 
 URL、Key、模型名及语音配置均未预填真实值。未配置模型时可以打开页面，发送时提示配置，不会伪造回复。
 

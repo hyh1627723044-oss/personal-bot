@@ -7,30 +7,40 @@ from app.settings import Settings
 
 
 async def run_bot(connection, config: Settings):
-    from pipecat.audio.vad.silero import SileroVADAnalyzer
     from pipecat.pipeline.pipeline import Pipeline
     from pipecat.pipeline.worker import PipelineParams, PipelineWorker
-    from pipecat.processors.aggregators.llm_context import LLMContext
-    from pipecat.processors.aggregators.llm_response_universal import (
-        LLMContextAggregatorPair,
-        LLMUserAggregatorParams,
-    )
     from pipecat.transports.base_transport import TransportParams
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
     from pipecat.workers.runner import WorkerRunner
 
-    stt, llm, tts = create_services(config)
     transport = SmallWebRTCTransport(
         webrtc_connection=connection,
         params=TransportParams(audio_in_enabled=True, audio_out_enabled=True),
     )
-    context = LLMContext([{'role': 'system', 'content': config.system_prompt}])
-    user, assistant = LLMContextAggregatorPair(
-        context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
-    )
+    input_rate = 16000
+    if config.voice_engine == 'realtime':
+        from app.realtime import RealtimeService
+
+        realtime = RealtimeService(config)
+        input_rate = realtime.input_sample_rate
+        processors = [transport.input(), realtime, transport.output()]
+    else:
+        from pipecat.audio.vad.silero import SileroVADAnalyzer
+        from pipecat.processors.aggregators.llm_context import LLMContext
+        from pipecat.processors.aggregators.llm_response_universal import (
+            LLMContextAggregatorPair,
+            LLMUserAggregatorParams,
+        )
+
+        stt, llm, tts = create_services(config)
+        context = LLMContext([{'role': 'system', 'content': config.system_prompt}])
+        user, assistant = LLMContextAggregatorPair(
+            context, user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),
+        )
+        processors = [transport.input(), stt, user, llm, tts, transport.output(), assistant]
     worker = PipelineWorker(
-        Pipeline([transport.input(), stt, user, llm, tts, transport.output(), assistant]),
-        params=PipelineParams(audio_in_sample_rate=16000, audio_out_sample_rate=24000),
+        Pipeline(processors),
+        params=PipelineParams(audio_in_sample_rate=input_rate, audio_out_sample_rate=24000),
         enable_rtvi=True,
         idle_timeout_secs=120,
     )

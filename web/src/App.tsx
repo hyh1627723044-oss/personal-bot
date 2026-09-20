@@ -8,7 +8,7 @@ import TextChat from './TextChat';
 import VoiceComposer from './VoiceComposer';
 
 type Service = { provider: string | null; supported: string[]; configured: boolean };
-type Config = { ready: boolean; text_ready: boolean; text_missing: string[]; missing: string[]; issues: string[]; services: Record<string, Service> };
+type Config = { ready: boolean; voice_engine: 'cascade' | 'realtime'; text_ready: boolean; text_missing: string[]; text_issues: string[]; missing: string[]; issues: string[]; services: Record<string, Service> };
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const timeout = AbortSignal.timeout(10000);
@@ -47,7 +47,10 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
   const displayedError = error || (mode === 'voice' ? call.error : '');
   const modeReady = mode === 'text' ? config?.text_ready : config?.ready;
   const missingFields = (mode === 'text' ? config?.text_missing : config?.missing) ?? [];
-  const configIssues = config?.issues.filter(issue => mode === 'voice' || issue.includes('LLM_')) ?? [];
+  const configIssues = (mode === 'text' ? config?.text_issues : config?.issues) ?? [];
+  const serviceRows = config?.voice_engine === 'realtime'
+    ? [['llm', '对话模型（文字模式）'], ['realtime', '实时语音模型（通话）']]
+    : [['llm', '对话模型'], ['stt', '语音识别（通话时需要）'], ['tts', '语音合成（通话时需要）']];
   const modalRef = useRef<HTMLElement>(null);
   const [switching, setSwitching] = useState(false);
   const switchLock = useRef(false);
@@ -129,6 +132,6 @@ export default function App({ onClientCreated }: { onClientCreated: (client: Pip
         <footer><span>留一点时间，给自己的想法。</span><span>POWERED BY PIPECAT</span></footer>
       </div>
     </main>
-    {(settings || help) && <div className="modal-backdrop" onClick={() => { showSettings(false); showHelp(false); }}><section ref={modalRef} role="dialog" aria-modal="true" aria-label={settings ? '服务配置' : '使用帮助'} className="modal" onClick={event => event.stopPropagation()}><button autoFocus className="modal-close icon-button" aria-label="关闭" onClick={() => { showSettings(false); showHelp(false); }}><X size={20}/></button>{settings ? <><div className="eyebrow">SERVICE SETUP</div><h2>连接你的助手</h2><p>在后端 <code>server/.env</code> 中配置服务并重启后端，然后点击重新检查。文字聊天只需对话模型，语音识别和合成可暂不配置。密钥只保存在后端。</p><div className="service-list">{[['llm', '对话模型'], ['stt', '语音识别（通话时需要）'], ['tts', '语音合成（通话时需要）']].map(([key, title]) => <div key={key}><span>{title}</span><strong>{config?.services[key]?.provider || '尚未选择'}</strong>{config?.services[key]?.configured ? <Check size={16}/> : <span className="pending-dot"/>}</div>)}</div>{missingFields.length ? <div className="missing"><h3>待填写配置</h3><div>{missingFields.map(item => <code key={item}>{item}</code>)}</div></div> : null}{configIssues.map(issue => <p className="issue" key={issue}>{issue}</p>)}{!config && <p>暂时无法读取配置，请确认后端已启动。</p>}<button className="primary-button" onClick={() => { void refresh(); }} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''}/>{loading ? '检查中…' : '重新检查'}</button></> : <><div className="eyebrow">GETTING STARTED</div><h2>让我们开始聊天</h2><ol><li>文字聊天：配置对话模型后，直接输入消息并发送；支持停止生成和新对话。</li><li>语音通话：额外配置语音识别和合成，点击「开始通话」并允许使用麦克风。</li><li>直接说话，等待助手回答；回答期间可以开口打断。</li><li>点击麦克风按钮静音，点击「结束通话」挂断。</li></ol><p>本机请通过 localhost 打开网页。远程使用需要 HTTPS。服务的模型与密钥配置方式见项目 README。</p></>}</section></div>}
+    {(settings || help) && <div className="modal-backdrop" onClick={() => { showSettings(false); showHelp(false); }}><section ref={modalRef} role="dialog" aria-modal="true" aria-label={settings ? '服务配置' : '使用帮助'} className="modal" onClick={event => event.stopPropagation()}><button autoFocus className="modal-close icon-button" aria-label="关闭" onClick={() => { showSettings(false); showHelp(false); }}><X size={20}/></button>{settings ? <><div className="eyebrow">SERVICE SETUP</div><h2>连接你的助手</h2><p>在后端 <code>server/.env</code> 中配置服务并重启后端，然后点击重新检查。文字模式使用对话模型；语音模式可选择实时语音模型，或语音识别、对话模型与语音合成的组合。密钥只保存在后端。</p><div className="service-list">{serviceRows.map(([key, title]) => <div key={key}><span>{title}</span><strong>{config?.services[key]?.provider || '尚未选择'}</strong>{config?.services[key]?.configured ? <Check size={16}/> : <span className="pending-dot"/>}</div>)}</div>{missingFields.length ? <div className="missing"><h3>待填写配置</h3><div>{missingFields.map(item => <code key={item}>{item}</code>)}</div></div> : null}{configIssues.map(issue => <p className="issue" key={issue}>{issue}</p>)}{!config && <p>暂时无法读取配置，请确认后端已启动。</p>}<button className="primary-button" onClick={() => { void refresh(); }} disabled={loading}><RefreshCw size={16} className={loading ? 'spin' : ''}/>{loading ? '检查中…' : '重新检查'}</button></> : <><div className="eyebrow">GETTING STARTED</div><h2>让我们开始聊天</h2><ol><li>文字聊天：配置对话模型后，直接输入消息并发送；支持停止生成和新对话。</li><li>语音通话：配置实时语音模型，或补齐语音识别和合成，点击「开始通话」并允许使用麦克风。</li><li>直接说话，等待助手回答；回答期间可以开口打断。</li><li>点击麦克风按钮静音，点击「结束通话」挂断。</li></ol><p>本机请通过 localhost 打开网页。远程使用需要 HTTPS。服务的模型与密钥配置方式见项目 README。</p></>}</section></div>}
   </div>;
 }

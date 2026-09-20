@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 PROVIDERS = {
     'stt': ('openai', 'deepgram'),
@@ -24,6 +24,12 @@ class Settings(BaseSettings):
         env_file_encoding='utf-8', extra='ignore',
     )
     stt_provider: str = ''
+    voice_engine: Literal['cascade', 'realtime'] = 'cascade'
+    realtime_provider: str = ''
+    realtime_api_key: SecretStr = SecretStr('')
+    realtime_model: str = ''
+    realtime_base_url: str = ''
+    realtime_voice: str = ''
     stt_api_key: SecretStr = SecretStr('')
     stt_model: str = ''
     stt_base_url: str = ''
@@ -80,7 +86,36 @@ class Settings(BaseSettings):
                 not any(name.startswith(prefix) for name in missing)
                 and not any(prefix in issue for issue in issues)
             )
+        text_missing = [name for name in missing if name.startswith('LLM_')]
+        text_issues = [issue for issue in issues if 'LLM_' in issue]
+        rt_missing = []
+        rt_issues = []
+        for suffix in ('provider', 'api_key', 'model', 'base_url', 'voice'):
+            value = getattr(self, f'realtime_{suffix}')
+            if isinstance(value, SecretStr):
+                value = value.get_secret_value().strip()
+            if not value:
+                rt_missing.append(f'REALTIME_{suffix.upper()}')
+        if self.realtime_provider and self.realtime_provider not in ('qwen', 'stepfun'):
+            rt_issues.append('REALTIME_PROVIDER 请选择 qwen 或 stepfun')
+        try:
+            url = urlsplit(self.realtime_base_url)
+            valid_url = (url.scheme == 'wss' or (
+                url.scheme == 'ws' and url.hostname in ('localhost', '127.0.0.1', '::1')
+            )) and bool(url.hostname) and not url.username and not url.password
+            valid_url = valid_url and not url.fragment and '{' not in self.realtime_base_url
+        except ValueError:
+            valid_url = False
+        if self.realtime_base_url and not valid_url:
+            rt_issues.append('REALTIME_BASE_URL 必须是完整 WSS 地址（本机调试可用 ws）')
+        services['realtime'] = {
+            'provider': self.realtime_provider or None, 'supported': ['qwen', 'stepfun'],
+            'configured': not rt_missing and not rt_issues,
+        }
+        if self.voice_engine == 'realtime':
+            missing, issues = rt_missing, rt_issues
         return {'ready': not missing and not issues, 'missing': missing,
                 'issues': issues, 'services': services,
+                'voice_engine': self.voice_engine, 'text_issues': text_issues,
                 'text_ready': services['llm']['configured'],
-                'text_missing': [name for name in missing if name.startswith('LLM_')]}
+                'text_missing': text_missing}

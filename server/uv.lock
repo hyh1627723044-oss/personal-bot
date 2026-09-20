@@ -1797,6 +1797,7 @@ dependencies = [
     { name = "pipecat-ai", extra = ["deepgram", "webrtc"] },
     { name = "pydantic-settings" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1814,6 +1815,7 @@ requires-dist = [
     { name = "pipecat-ai", extras = ["webrtc", "deepgram"], specifier = "==1.8.1" },
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
+    { name = "websockets", specifier = ">=14,<18" },
 ]
 
 [package.metadata.requires-dev]
